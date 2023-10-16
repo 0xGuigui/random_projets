@@ -1,49 +1,56 @@
-# Define the output CSV file path
-$csvPath = "$env:USERPROFILE\Desktop\AD_Users_FullInfo.csv"
+# Définition de l'encodage de PowerShell
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
-# Create an array to store the data
-$exportData = @()
+# Spécifiez le chemin complet du fichier de sortie CSV
+$OutputFile = [System.IO.Path]::Combine([System.Environment]::GetFolderPath('Desktop'), 'DUMP_AD.csv')
 
-# Retrieve all users from Active Directory
-$users = Get-ADUser -Filter *
-
-foreach ($user in $users) {
-    # Create a custom object to store user information
-    $userObject = New-Object PSObject -Property @{
-        "Name" = $user.Name
-        "SamAccountName" = $user.SamAccountName
-        "DistinguishedName" = $user.DistinguishedName
-        "Enabled" = $user.Enabled
-        "GivenName" = $user.GivenName
-        "Surname" = $user.Surname
-        "EmailAddress" = $user.EmailAddress
-        "Office" = $user.Office
-        "Department" = $user.Department
-        "Title" = $user.Title
-        "Description" = $user.Description
-        "StreetAddress" = $user.StreetAddress
-        "City" = $user.City
-        "State" = $user.State
-        "PostalCode" = $user.PostalCode
-        "Country" = $user.Country
-        "EmployeeID" = $user.EmployeeID
-        "EmployeeNumber" = $user.EmployeeNumber
-        "Manager" = (Get-ADUser $user.Manager -Properties DisplayName).DisplayName
-        "MemberOf" = ($user | Get-ADPrincipalGroupMembership | Select-Object -ExpandProperty Name -join ", ")
-        "IsAdministrator" = $false
-    }
-
-    # Check membership in the "Administrators" group
-    $group = Get-ADGroup -Filter {Name -eq "Administrators"}
-    if ($user.MemberOf -contains $group.DistinguishedName) {
-        $userObject.IsAdministrator = $true
-    }
-
-    # Add the object to the list of exported data
-    $exportData += $userObject
+# Charger le module Active Directory si ce n'est pas déjà fait
+if (-not (Get-Module -Name ActiveDirectory)) {
+    Import-Module ActiveDirectory
+    Write-Host "Module Active Directory chargé."
 }
 
-# Export the data to a CSV file
-$exportData | Export-Csv -Path $csvPath -NoTypeInformation
+# Obtenir tous les utilisateurs de l'Active Directory
+$Users = Get-ADUser -Filter *
+Write-Host "Récupération des utilisateurs depuis Active Directory..."
 
-Write-Host "Export completed. Data has been saved to $csvPath."
+# Créer un tableau pour stocker les données
+$UserList = @()
+
+# Parcourir chaque utilisateur et extraire les informations nécessaires
+foreach ($User in $Users) {
+    # Vérifier si le compte est actif
+    $IsAccountActive = $User.Enabled
+
+    # Obtenir tous les groupes auxquels l'utilisateur appartient
+    $UserGroups = ($User | Get-ADPrincipalGroupMembership).Name -join ' - '
+
+    # Obtenir le chemin complet de l'unité organisationnelle (OU) sous forme propre
+    $OUs = $User.DistinguishedName -split ',' | Where-Object { $_ -match 'OU=' } | ForEach-Object { $_ -replace 'OU=', '' }
+    $OUPath = $OUs -join ' - '
+
+    # Obtenir la Fonction, le Service, la Ville et l'Adresse de messagerie de l'utilisateur
+    $Function = $User.Title
+    $Service = $User.Department
+    $Ville = $User.L
+    $AdresseEmail = $User.EmailAddress
+    
+    $UserObj = New-Object PSObject -Property @{
+        "Compte actif" = $IsAccountActive
+        "Login" = $User.SamAccountName
+        "Nom" = $User.Surname
+        "Prénom" = $User.GivenName
+        "Email" = $AdresseEmail
+        "Fonction" = $Function
+        "Service" = $Service
+        "Groupes" = $UserGroups
+        "Role" = $OUPath
+        "Ville" = $Ville
+    }
+    $UserList += $UserObj
+    Write-Host "Données de l'utilisateur $($User.SamAccountName) traitées."
+}
+
+# Exporter le tableau vers un fichier CSV
+$UserList | Export-Csv -Path $OutputFile -NoTypeInformation -Encoding UTF8
+Write-Host "Les données de l'Active Directory ont été sauvegardées dans $OutputFile."
